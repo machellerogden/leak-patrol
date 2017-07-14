@@ -11,6 +11,37 @@ const v8 = require('v8');
 const heapSizeLimit = v8.getHeapStatistics().heap_size_limit;
 let markSweepCount = 0;
 let bound = false;
+const openRequests = [];
+
+function requestLogger(httpModule){
+    var original = httpModule.request;
+    httpModule.request = (options, fn) => {
+        const requestStartTime = process.hrtime();
+        const reqId = requestStartTime.join('');
+        openRequests.push(reqId);
+        console.error('open-requests-count', openRequests.length);
+        return original(options, (...args) => {
+            const res = args[0];
+            const reqStr = `${options.method} ${options.href || (options.proto + '://' + options.host + options.path)} - id: ${reqId}`;
+            //setTimeout(() => {
+                //const i = openRequests.indexOf(reqId);
+                //if (i !== -1) {
+                    //console.error('external-request-held', reqStr);
+                //}
+            //}, 5000);
+            console.error('external-request', reqStr);
+            res.on('end', () => {
+                const requestElapsedTime = process.hrtime(requestStartTime);
+                console.error('external-request-time-elapsed', `${reqStr} - elapsed: ${(requestElapsedTime[0] * 1e9 + requestElapsedTime[1]) / 1e6}ms`);
+                const i = openRequests.indexOf(reqId);
+                if (i !== -1) {
+                    openRequests.splice(i, 1);
+                }
+            });
+            return typeof fn === 'function' && fn(...args);
+        });
+    };
+}
 
 module.exports = function leakPatrol(options) {
     options = options || {};
@@ -18,8 +49,10 @@ module.exports = function leakPatrol(options) {
     const graphDeltas = options.graphDeltas || false;
 
     if (bound === false) {
+        bound = true;
+        requestLogger(require('http'));
+        requestLogger(require('https'));
         profiler.on('gc', (info) => {
-            bound = true;
             if (info.type === "MarkSweepCompact") {
 
                 // count mark sweep
@@ -58,6 +91,13 @@ module.exports = function leakPatrol(options) {
                         }
                     });
                 })));
+
+                const lastEventLoopTime = process.hrtime();
+                setImmediate(() => {
+                    const eventLoopDelay = process.hrtime(lastEventLoopTime);
+                    console.error('Event Loop Delay: ', `${(eventLoopDelay[0] * 1e9 + eventLoopDelay[1]) / 1e6}ms`);
+                });
+
 
                 if (snapshotsAtMarkSweep.indexOf(markSweepCount) != -1) {
                     require('heapdump').writeSnapshot((err, filename) => {
