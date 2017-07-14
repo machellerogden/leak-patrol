@@ -77,13 +77,32 @@ module.exports = function leakPatrol(options) {
                     heapUsedTrend.unshift('Heap Used: ');
                 }
 
+                const completedRequestsReport = _.reduce(completedRequests, (acc, entry) => {
+                    const i = _.findIndex(acc, { request: entry.info });
+                    if (i !== -1) {
+                        acc[i].averageElapsedTime = (acc[i].averageElapsedTime + entry.elapsed) / 2;
+                    } else {
+                        acc.push({
+                            averageElapsedTime: entry.elapsed,
+                            request: entry.info
+                        });
+                    }
+                    return acc;
+                }, []);
+
+                // clear completed requests
+                completedRequests = [];
+
                 const lastEventLoopTime = process.hrtime();
                 setImmediate(() => {
                     const eventLoopDelay = process.hrtime(lastEventLoopTime);
 
-                    console.error(`*********** ${info.type} #${markSweepCount} - PID: ${process.pid} - Heap Size Limit: ${bytes(heapSizeLimit)} ***********`);
+                    console.error(`\n*********** ${info.type} #${markSweepCount} - PID: ${process.pid} - Heap Size Limit: ${bytes(heapSizeLimit)} ***********`);
 
-                    console.error(Table.print(Object.assign({}, info, _.mapValues(mem, bytes), _.mapValues(deltas, bytes))));
+                    console.error(Table.print(Object.assign({}, info, _.mapValues(mem, bytes), _.mapValues(deltas, bytes), {
+                        openRequestCount: openRequests.length,
+                        eventLoopDelay: `${(eventLoopDelay[0] * 1e9 + eventLoopDelay[1]) / 1e6}ms`
+                    })));
 
                     console.error(Table.print(_.map(v8.getHeapSpaceStatistics(), (entry) => {
                         return _.mapValues(entry, (v) => {
@@ -100,31 +119,12 @@ module.exports = function leakPatrol(options) {
                         console.error.apply(console, heapUsedTrend);
                     }
 
-                    const completedRequestsReport = _.reduce(completedRequests, (acc, entry) => {
-                        const i = _.findIndex(acc, { request: entry.info });
-                        if (i !== -1) {
-                            acc[i].averageElapsedTime = (acc[i].averageElapsedTime + entry.elapsed) / 2;
-                        } else {
-                            acc.push({
-                                averageElapsedTime: entry.elapsed,
-                                request: entry.info
-                            });
-                        }
-                        return acc;
-                    }, []);
-
                     if (completedRequests.length) {
                         console.error('Completed Requests:');
                         console.error(Table.print(completedRequestsReport));
                     }
 
-                    // clear completed requests
-                    completedRequests = [];
-
-                    console.error('Open Request Count:', openRequests.length);
-                    console.error('Event Loop Delay: ', `${(eventLoopDelay[0] * 1e9 + eventLoopDelay[1]) / 1e6}ms`);
                 });
-
 
                 if (snapshotsAtMarkSweep.indexOf(markSweepCount) != -1) {
                     require('heapdump').writeSnapshot((err, filename) => {
