@@ -11,32 +11,31 @@ const v8 = require('v8');
 const heapSizeLimit = v8.getHeapStatistics().heap_size_limit;
 let markSweepCount = 0;
 let bound = false;
-const openRequests = [];
+let openRequests = [];
+let completedRequests = [];
 
 function requestLogger(httpModule){
     var original = httpModule.request;
     httpModule.request = (options, fn) => {
         const requestStartTime = process.hrtime();
         const reqId = requestStartTime.join('');
-        openRequests.push(reqId);
-        console.error('open-requests-count', openRequests.length);
+        const reqStr = `${options.method} ${options.href || (options.proto + '://' + options.host + options.path)}`;
+        openRequests.push({
+            id: reqId,
+            info: reqStr
+        });
         return original(options, (...args) => {
             const res = args[0];
-            const reqStr = `${options.method} ${options.href || (options.proto + '://' + options.host + options.path)} - id: ${reqId}`;
-            //setTimeout(() => {
-                //const i = openRequests.indexOf(reqId);
-                //if (i !== -1) {
-                    //console.error('external-request-held', reqStr);
-                //}
-            //}, 5000);
-            console.error('external-request', reqStr);
             res.on('end', () => {
                 const requestElapsedTime = process.hrtime(requestStartTime);
-                console.error('external-request-time-elapsed', `${reqStr} - elapsed: ${(requestElapsedTime[0] * 1e9 + requestElapsedTime[1]) / 1e6}ms`);
-                const i = openRequests.indexOf(reqId);
-                if (i !== -1) {
-                    openRequests.splice(i, 1);
-                }
+                completedRequests.push({
+                    id: reqId,
+                    info: reqStr,
+                    elapsed: (requestElapsedTime[0] * 1e9 + requestElapsedTime[1]) / 1e6
+                });
+                openRequests = _.filter(openRequests, (entry) => {
+                    return (entry.id !== reqId);
+                });
             });
             return typeof fn === 'function' && fn(...args);
         });
@@ -57,7 +56,6 @@ module.exports = function leakPatrol(options) {
 
                 // count mark sweep
                 markSweepCount++;
-                console.error(`*********** ${info.type} #${markSweepCount} - PID: ${process.pid} - Heap Size Limit: ${bytes(heapSizeLimit)} ***********`);
 
                 const mem = process.memoryUsage();
                 let deltas = {};
@@ -67,7 +65,6 @@ module.exports = function leakPatrol(options) {
                     }), (v, k) => `${k}Delta`);
                 }
                 memHistory.push(_.assign({}, mem));
-                console.error(Table.print(Object.assign({}, info, _.mapValues(mem, bytes), _.mapValues(deltas, bytes))));
 
                 if (graphDeltas) {
                     const heapTotalTrend = memHistory.map((entry) => {
@@ -78,23 +75,53 @@ module.exports = function leakPatrol(options) {
                     });
                     heapTotalTrend.unshift('Heap Total: ');
                     heapUsedTrend.unshift('Heap Used: ');
-                    console.error.apply(console, heapTotalTrend);
-                    console.error.apply(console, heapUsedTrend);
                 }
-
-                console.error(Table.print(_.map(v8.getHeapSpaceStatistics(), (entry) => {
-                    return _.mapValues(entry, (v) => {
-                        if (_.isNumber(v)) {
-                            return bytes(v);
-                        } else {
-                            return v;
-                        }
-                    });
-                })));
 
                 const lastEventLoopTime = process.hrtime();
                 setImmediate(() => {
                     const eventLoopDelay = process.hrtime(lastEventLoopTime);
+
+                    console.error(`*********** ${info.type} #${markSweepCount} - PID: ${process.pid} - Heap Size Limit: ${bytes(heapSizeLimit)} ***********`);
+
+                    console.error(Table.print(Object.assign({}, info, _.mapValues(mem, bytes), _.mapValues(deltas, bytes))));
+
+                    console.error(Table.print(_.map(v8.getHeapSpaceStatistics(), (entry) => {
+                        return _.mapValues(entry, (v) => {
+                            if (_.isNumber(v)) {
+                                return bytes(v);
+                            } else {
+                                return v;
+                            }
+                        });
+                    })));
+
+                    if (graphDeltas) {
+                        console.error.apply(console, heapTotalTrend);
+                        console.error.apply(console, heapUsedTrend);
+                    }
+
+                    const completedRequestsReport = _.reduce(completedRequests, (acc, entry) => {
+                        const i = _.findIndex(acc, { request: entry.info });
+                        if (i !== -1) {
+                            acc[i].averageElapsedTime = (acc[i].averageElapsedTime + entry.elapsed) / 2;
+                        } else {
+                            acc.push({
+                                averageElapsedTime: entry.elapsed,
+                                request: entry.info
+                            });
+                        }
+                        return acc;
+                    }, []);
+
+                    if (completedRequests.length) {
+                        console.error('Completed Requests:');
+                        console.error(Table.print(completedRequestsReport));
+                    }
+
+                    // clear completed requests
+                    completedRequests = [];
+
+                    console.error('Open Request Count:', openRequests.length);
                     console.error('Event Loop Delay: ', `${(eventLoopDelay[0] * 1e9 + eventLoopDelay[1]) / 1e6}ms`);
                 });
 
