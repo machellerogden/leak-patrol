@@ -9,6 +9,7 @@ const memHistory = [];
 const normalize = (val, max, min) => ((val - min) / (max - min));
 const v8 = require('v8');
 const heapSizeLimit = v8.getHeapStatistics().heap_size_limit;
+const heapSizeLimitBytes = bytes(heapSizeLimit);
 let markSweepCount = 0;
 let bound = false;
 let openRequests = [];
@@ -80,9 +81,11 @@ module.exports = function leakPatrol(options) {
                 const completedRequestsReport = _.reduce(completedRequests, (acc, entry) => {
                     const i = _.findIndex(acc, { request: entry.info });
                     if (i !== -1) {
+                        acc[i].count++;
                         acc[i].averageElapsedTime = (acc[i].averageElapsedTime + entry.elapsed) / 2;
                     } else {
                         acc.push({
+                            count: 1,
                             averageElapsedTime: entry.elapsed,
                             request: entry.info
                         });
@@ -97,12 +100,21 @@ module.exports = function leakPatrol(options) {
                 setImmediate(() => {
                     const eventLoopDelay = process.hrtime(lastEventLoopTime);
 
-                    console.error(`\n*********** ${info.type} #${markSweepCount} - PID: ${process.pid} - Heap Size Limit: ${bytes(heapSizeLimit)} ***********`);
+                    console.error(`\n*********** ${info.type} #${markSweepCount} ***********`);
 
-                    console.error(Table.print(Object.assign({}, info, _.mapValues(mem, bytes), _.mapValues(deltas, bytes), {
-                        openRequestCount: openRequests.length,
-                        eventLoopDelay: `${(eventLoopDelay[0] * 1e9 + eventLoopDelay[1]) / 1e6}ms`
-                    })));
+                    console.error(Table.print(Object.assign({},
+                        info,
+                        {
+                            pid: process.pid,
+                            heapSizeLimit: heapSizeLimitBytes
+                        },
+                        _.mapValues(mem, bytes),
+                        _.mapValues(deltas, bytes),
+                        {
+                            openRequestCount: openRequests.length,
+                            eventLoopDelay: `${(eventLoopDelay[0] * 1e9 + eventLoopDelay[1]) / 1e6}ms`
+                        }
+                    )));
 
                     console.error(Table.print(_.map(v8.getHeapSpaceStatistics(), (entry) => {
                         return _.mapValues(entry, (v) => {
@@ -120,7 +132,7 @@ module.exports = function leakPatrol(options) {
                     }
 
                     if (completedRequests.length) {
-                        console.error('Completed Requests:');
+                        console.error('Requests Completed Since Last Mark Sweep:');
                         console.error(Table.print(completedRequestsReport));
                     }
 
