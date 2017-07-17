@@ -9,7 +9,6 @@
   "keywords": [
     "memory",
     "leak",
-    "heapdump",
     "debug",
     "tool"
   ],
@@ -24,7 +23,6 @@
     "bytes": "^2.5.0",
     "easy-table": "^1.1.0",
     "gc-profiler": "^1.4.0",
-    "lodash": "^4.17.4",
-    "vertical-meter": "^0.1.0"
+    "lodash": "^4.17.4"
   }
 }
