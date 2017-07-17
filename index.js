@@ -25,7 +25,7 @@ function requestLogger(httpModule){
             id: reqId,
             info: reqStr
         });
-        return original(options, (...args) => {
+        const req = original(options, (...args) => {
             const res = args[0];
             res.on('end', () => {
                 const requestElapsedTime = process.hrtime(requestStartTime);
@@ -40,6 +40,12 @@ function requestLogger(httpModule){
             });
             return typeof fn === 'function' && fn(...args);
         });
+        req.on('error', (e) => {
+            openRequests = _.filter(openRequests, (entry) => {
+                return (entry.id !== reqId);
+            });
+        });
+        return req;
     };
 }
 
