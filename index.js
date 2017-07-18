@@ -83,7 +83,7 @@ profiler.on('gc', (info) => {
 
             if (completedRequestsReport.length) {
                 console.error('Requests Completed Since Last Mark Sweep:');
-                console.error(Table.print(completedRequestsReport));
+                console.error(Table.print(completedRequestsReport).split('\n').map((v) => v.slice(0, process.stderr.columns)).join('\n'));
             }
 
             if (snapshotsAtMarkSweep.indexOf(markSweepCount) != -1) {
