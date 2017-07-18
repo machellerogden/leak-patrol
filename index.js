@@ -14,43 +14,8 @@ let openRequests = [];
 let completedRequests = [];
 const snapshotsAtMarkSweep = (process.env.LP_HEAPS_AT || '').split(',').reduce((a, v) => (v && a.push(+v), a), []);
 
-function requestLogger(httpModule){
-    var original = httpModule.request;
-    httpModule.request = (options, fn) => {
-        const requestStartTime = process.hrtime();
-        const reqId = requestStartTime.join('');
-        const reqStr = `${options.method} ${options.href || (options.proto + '://' + options.host + options.path)}`;
-        //console.error(reqStr);
-        openRequests.push({
-            id: reqId,
-            info: reqStr
-        });
-        const req = original(options, (...args) => {
-            const res = args[0];
-            res.on('end', () => {
-                const requestElapsedTime = process.hrtime(requestStartTime);
-                completedRequests.push({
-                    id: reqId,
-                    info: reqStr,
-                    elapsed: (requestElapsedTime[0] * 1e9 + requestElapsedTime[1]) / 1e6
-                });
-                openRequests = _.filter(openRequests, (entry) => {
-                    return (entry.id !== reqId);
-                });
-            });
-            return typeof fn === 'function' && fn(...args);
-        });
-        req.on('error', (e) => {
-            openRequests = _.filter(openRequests, (entry) => {
-                return (entry.id !== reqId);
-            });
-        });
-        return req;
-    };
-}
-
-requestLogger(require('http'));
-requestLogger(require('https'));
+instrumentRequest(require('http'));
+instrumentRequest(require('https'));
 
 profiler.on('gc', (info) => {
     if (info.type === "MarkSweepCompact") {
@@ -116,7 +81,7 @@ profiler.on('gc', (info) => {
                 });
             })));
 
-            if (completedRequests.length) {
+            if (completedRequestsReport.length) {
                 console.error('Requests Completed Since Last Mark Sweep:');
                 console.error(Table.print(completedRequestsReport));
             }
@@ -132,3 +97,38 @@ profiler.on('gc', (info) => {
 
     }
 });
+
+function instrumentRequest(httpModule){
+    var original = httpModule.request;
+    httpModule.request = (options, fn) => {
+        const requestStartTime = process.hrtime();
+        const reqId = requestStartTime.join('');
+        const reqStr = `${options.method} ${options.href || (options.proto + '://' + options.host + options.path)}`;
+        //console.error(reqStr);
+        openRequests.push({
+            id: reqId,
+            info: reqStr
+        });
+        const req = original(options, (...args) => {
+            const res = args[0];
+            res.on('end', () => {
+                const requestElapsedTime = process.hrtime(requestStartTime);
+                completedRequests.push({
+                    id: reqId,
+                    info: reqStr,
+                    elapsed: (requestElapsedTime[0] * 1e9 + requestElapsedTime[1]) / 1e6
+                });
+                openRequests = _.filter(openRequests, (entry) => {
+                    return (entry.id !== reqId);
+                });
+            });
+            return typeof fn === 'function' && fn(...args);
+        });
+        req.on('error', (e) => {
+            openRequests = _.filter(openRequests, (entry) => {
+                return (entry.id !== reqId);
+            });
+        });
+        return req;
+    };
+}
