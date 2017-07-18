@@ -12,6 +12,7 @@ const heapSizeLimitBytes = bytes(heapSizeLimit);
 let markSweepCount = 0;
 let openRequests = [];
 let completedRequests = [];
+const snapshotsAtMarkSweep = (process.env.LP_HEAPS_AT || '').split(',').reduce((a, v) => (v && a.push(+v), a), []);
 
 function requestLogger(httpModule){
     var original = httpModule.request;
@@ -53,41 +54,40 @@ requestLogger(require('https'));
 
 profiler.on('gc', (info) => {
     if (info.type === "MarkSweepCompact") {
-
-        // count mark sweep
-        markSweepCount++;
-
-        process.emit('lp:marksweep', markSweepCount);
-
-        const mem = process.memoryUsage();
-        let deltas = {};
-        if (memHistory.length) {
-            deltas = _.mapKeys(_.assignWith(memHistory[memHistory.length - 1], mem, (lastVal, newVal) => {
-                return newVal - lastVal;
-            }), (v, k) => `${k}Delta`);
-        }
-        memHistory.push(_.assign({}, mem));
-
-        const completedRequestsReport = _.reduce(completedRequests, (acc, entry) => {
-            const i = _.findIndex(acc, { request: entry.info });
-            if (i !== -1) {
-                acc[i].count++;
-                acc[i].averageElapsedTime = (acc[i].averageElapsedTime + entry.elapsed) / 2;
-            } else {
-                acc.push({
-                    count: 1,
-                    averageElapsedTime: entry.elapsed,
-                    request: entry.info
-                });
-            }
-            return acc;
-        }, []);
-
-        // clear completed requests
-        completedRequests = [];
-
         const lastEventLoopTime = process.hrtime();
         setImmediate(() => {
+            // count mark sweep
+            markSweepCount++;
+
+            process.emit('lp:marksweep', markSweepCount);
+
+            const mem = process.memoryUsage();
+            let deltas = {};
+            if (memHistory.length) {
+                deltas = _.mapKeys(_.assignWith(memHistory[memHistory.length - 1], mem, (lastVal, newVal) => {
+                    return newVal - lastVal;
+                }), (v, k) => `${k}Delta`);
+            }
+            memHistory.push(_.assign({}, mem));
+
+            const completedRequestsReport = _.reduce(completedRequests, (acc, entry) => {
+                const i = _.findIndex(acc, { request: entry.info });
+                if (i !== -1) {
+                    acc[i].count++;
+                    acc[i].averageElapsedTime = (acc[i].averageElapsedTime + entry.elapsed) / 2;
+                } else {
+                    acc.push({
+                        count: 1,
+                        averageElapsedTime: entry.elapsed,
+                        request: entry.info
+                    });
+                }
+                return acc;
+            }, []);
+
+            // clear completed requests
+            completedRequests = [];
+
             const eventLoopDelay = process.hrtime(lastEventLoopTime);
 
             console.error(`\n*********** ${info.type} #${markSweepCount} ***********`);
@@ -119,6 +119,13 @@ profiler.on('gc', (info) => {
             if (completedRequests.length) {
                 console.error('Requests Completed Since Last Mark Sweep:');
                 console.error(Table.print(completedRequestsReport));
+            }
+
+            if (snapshotsAtMarkSweep.indexOf(markSweepCount) != -1) {
+                require('heapdump').writeSnapshot((err, filename) => {
+                    if (err) {return console.error(err);}
+                    console.error('dump written to', filename);
+                });
             }
 
         });

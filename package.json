@@ -23,6 +23,7 @@
     "bytes": "^2.5.0",
     "easy-table": "^1.1.0",
     "gc-profiler": "^1.4.0",
+    "heapdump": "^0.3.9",
     "lodash": "^4.17.4"
   }
 }
