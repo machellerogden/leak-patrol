@@ -13,6 +13,7 @@ let markSweepCount = 0;
 let openRequests = [];
 let completedRequests = [];
 const snapshotsAtMarkSweep = (process.env.LP_HEAPS_AT || '').split(',').reduce((a, v) => (v && a.push(+v), a), []);
+const logAllRequests = !!process.env.LP_LOG_REQS;
 
 instrumentRequest(require('http'));
 instrumentRequest(require('https'));
@@ -104,7 +105,9 @@ function instrumentRequest(httpModule){
         const requestStartTime = process.hrtime();
         const reqId = requestStartTime.join('');
         const reqStr = `${options.method} ${options.href || (options.proto + '://' + options.host + options.path)}`;
-        //console.error(reqStr);
+        if (logAllRequests) {
+            console.error(reqStr);
+        }
         openRequests.push({
             id: reqId,
             info: reqStr
